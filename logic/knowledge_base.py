@@ -35,7 +35,8 @@ class KnowledgeBase:
             "profile": profile_data,
             "messages": messages or {},
             "url": url,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "status": "Sent"  # Default status
         }
         
         # Check if exists (by name + company)
@@ -43,15 +44,27 @@ class KnowledgeBase:
             if (p.get("name", "").lower() == entry["name"].lower() and 
                 p.get("company", "").lower() == entry["company"].lower()):
                 entry["id"] = p.get("id", entry["id"])  # Keep original ID
+                entry["status"] = p.get("status", "Sent") # Keep existing status
                 data[i] = entry
                 break
         else:
             data.append(entry)
             
+    def save_all(self, data):
+        """Save the entire list of prospects to file."""
         with open(self.file_path, 'w') as f:
             json.dump(data, f, indent=2)
+
+    def update_status(self, prospect_id, new_status):
+        """Update the status of a prospect (e.g., Replied, Opened)."""
+        data = self.load_all()
+        for p in data:
+            if p.get("id") == prospect_id:
+                p["status"] = new_status
+                break
         
-        return entry["id"]
+        with open(self.file_path, 'w') as f:
+            json.dump(data, f, indent=2)
 
     def delete_prospect(self, prospect_id):
         """Delete a prospect by ID."""

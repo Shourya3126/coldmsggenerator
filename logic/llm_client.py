@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 class KaggleClient:
-    def __init__(self, base_url="https://d7b7-34-168-46-38.ngrok-free.app"):
+    def __init__(self, base_url="https://aabb-34-26-185-21.ngrok-free.app"):
         # Ensure no trailing slash
         self.base_url = base_url.rstrip('/')
         self.generate_endpoint = f"{self.base_url}/generate"

@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import re
+import altair as alt
 from logic.ingestion import ResumeParser, WebScraper
 from logic.analyzer import ProspectAnalyzer
 from logic.generator import MessageGenerator
@@ -48,7 +49,7 @@ st.markdown("""
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
-    llm_url = st.text_input("Kaggle Endpoint URL", value="https://d7b7-34-168-46-38.ngrok-free.app")
+    llm_url = st.text_input("Kaggle Endpoint URL", value="https://aabb-34-26-185-21.ngrok-free.app")
     
     if st.button("Test Connection"):
         try:
@@ -80,7 +81,7 @@ with st.expander("💼 Your Offering / Context (Required to prevent hallucinatio
         placeholder="e.g. A new SaaS tool for social media scheduling..."
     )
 
-tab1, tab2, tab3 = st.tabs(["📝 New Campaign", "🚀 Batch Processing (CSV)", "📚 Knowledge Base"])
+tab1, tab2, tab3, tab4 = st.tabs(["📝 New Campaign", "🚀 Batch Processing (CSV)", "📚 Knowledge Base", "📊 Analytics"])
 
 with tab1:
     st.subheader("Import Prospect Data")
@@ -771,21 +772,70 @@ with tab3:
     data = kb.load_all()
     if data:
         # Display as a clean table
+        # Display as an editable table
         display_data = []
         for p in data:
             display_data.append({
+                "id": p.get("id", ""), 
                 "Name": p.get("name", "Unknown"),
                 "Company": p.get("company", "Unknown"),
                 "Role": p.get("role", "Unknown"),
                 "Industry": p.get("industry", "Unknown"),
-                "Has Messages": "✅" if p.get("messages") else "❌",
-                "URL": p.get("url", ""),
+                "Status": p.get("status", "Sent"),
                 "Saved": p.get("timestamp", "")[:10] if p.get("timestamp") else "",
-                "_id": p.get("id", "")
+                "Has Messages": "✅" if p.get("messages") else "❌",
+                "Email Words": len(p.get("messages", {}).get("email", {}).get("body", "").split()) if p.get("messages", {}).get("email", {}).get("body") else 0
             })
         
         kb_df = pd.DataFrame(display_data)
-        st.dataframe(kb_df.drop(columns=["_id"]), use_container_width=True)
+        
+        # Configure columns
+        column_config = {
+            "id": None, # Hide ID
+            "Status": st.column_config.SelectboxColumn(
+                "Status",
+                options=["Sent", "Opened", "Replied", "Meeting Booked", "Ghosted"],
+                required=True,
+                help="Update outreach status here"
+            ),
+            "Has Messages": st.column_config.TextColumn("Msgs", help="Messages generated?"),
+            "Saved": st.column_config.TextColumn("Date"),
+            "Email Words": st.column_config.NumberColumn("Email Words", help="Email body word count")
+        }
+        
+        st.info("💡 Pro Tip: You can edit the **Status** directly in the table below!")
+        
+        edited_df = st.data_editor(
+            kb_df,
+            column_config=column_config,
+            disabled=["Name", "Company", "Role", "Industry", "Saved", "Has Messages"],
+            use_container_width=True,
+            hide_index=True,
+            key="kb_editor"
+        )
+        
+        # Detect and Save Changes
+        if not kb_df.equals(edited_df):
+            # Create lookup for O(1) access
+            id_to_index = {p["id"]: i for i, p in enumerate(data)}
+            
+            changes_count = 0
+            for index, row in edited_df.iterrows():
+                 pid = row["id"]
+                 new_status = row["Status"]
+                 
+                 if pid in id_to_index:
+                     idx = id_to_index[pid]
+                     # Check if status changed
+                     if data[idx].get("status", "Sent") != new_status:
+                         data[idx]["status"] = new_status
+                         changes_count += 1
+            
+            if changes_count > 0:
+                kb.save_all(data)
+                st.toast(f"✅ Updated {changes_count} prospect(s)!")
+                time.sleep(1) # Brief pause to show toast before rerun
+                st.rerun()
         
         # Delete functionality
         st.divider()
@@ -799,7 +849,6 @@ with tab3:
                     kb.delete_prospect(prospect_id)
                     st.success(f"Deleted: {selected}")
                     st.rerun()
-        
         # View details
         with st.expander("🔍 View Prospect Details"):
             names_for_view = [f"{p.get('name', 'Unknown')} — {p.get('company', '')}" for p in data]
@@ -818,5 +867,167 @@ with tab3:
                     st.text_area("LinkedIn", value=saved_msgs["linkedin"], height=100, key=f"kb_li_{view_idx}")
                 if saved_msgs.get("whatsapp"):
                     st.text_area("WhatsApp", value=saved_msgs["whatsapp"], height=100, key=f"kb_wa_{view_idx}")
+        
+        # Practice Mode
+        st.divider()
+        with st.expander("🤖 Practice Mode (Simulate Reply)"):
+            st.info("Roleplay with the AI to test your messaging!")
+            practice_names = [f"{p.get('name', 'Unknown')} — {p.get('company', '')}" for p in data]
+            practice_sel = st.selectbox("Select prospect to simulate", practice_names, key="practice_select")
+            
+            if practice_sel:
+                p_idx = practice_names.index(practice_sel)
+                p_data = data[p_idx]
+                
+                # Get existing message
+                saved_msg = ""
+                msgs = p_data.get("messages", {})
+                if msgs.get("email"):
+                    saved_msg = f"Subject: {msgs['email'].get('subject', '')}\n\n{msgs['email'].get('body', '')}"
+                elif msgs.get("linkedin"):
+                    saved_msg = msgs["linkedin"]
+                
+                user_msg = st.text_area("Your Message (Edit to test variations)", value=saved_msg, height=200, key="practice_msg")
+                
+                c1, c2 = st.columns(2)
+                tone = c1.select_slider("Prospect Mood", options=["Interested", "Curious", "Skeptical", "Busy", "Angry"], value="Skeptical")
+                
+                if st.button("Simulate Reply", type="primary"):
+                    with st.spinner(f"Simulating {p_data.get('name')}..."):
+                        # Initialize Client
+                        from logic.llm_client import KaggleClient
+                        # Use global llm_url from sidebar
+                        client = KaggleClient(base_url=llm_url)
+                        
+                        # Construct Prompt
+                        prompt = f"""
+                        [Roleplay Task]
+                        You are {p_data.get('name')}, {p_data.get('role')} at {p_data.get('company')}.
+                        Your background summary: {p_data.get('summary')}
+                        
+                        You just received this cold outreach message:
+                        ---
+                        {user_msg}
+                        ---
+                        
+                        Task: Write a realistic email reply.
+                        Your current mood is {tone}.
+                        Keep it short (under 50 words) and authentic to a busy professional.
+                        Do not include subject line, just the body.
+                        If you are busy/skeptical, be brief or dismissive.
+                        If interested, ask a relevant follow-up question.
+                        """
+                        
+                        reply = client.generate(prompt, max_new_tokens=150)
+                        
+                        st.markdown(f"**📩 Reply from {p_data.get('name')}:**")
+                        st.info(reply)
+
     else:
         st.info("No prospects saved yet. Process profiles to auto-populate the Knowledge Base.")
+
+with tab4:
+    st.header("📊 Campaign Analytics (Actual Data)")
+    st.markdown("Metrics based on your tracked outreach results in the Knowledge Base.")
+    
+    # Load actual data
+    kb_data = kb.load_all()
+    
+    if not kb_data:
+        st.info("No data available yet. Save prospects and update their status in the Knowledge Base to see detailed analytics.")
+    else:
+        df = pd.DataFrame(kb_data)
+        
+        # Ensure status exists
+        if "status" not in df.columns:
+            df["status"] = "Sent"
+        else:
+            df["status"] = df["status"].fillna("Sent")
+            
+        # Calculate KPIs
+        total_sent = len(df)
+        replies = df[df["status"].isin(["Replied", "Meeting Booked"])].shape[0]
+        # Assuming 'Opened' tag exists, or we count replies as opened too
+        opens = df[df["status"].isin(["Opened", "Replied", "Meeting Booked"])].shape[0]
+        
+        reply_rate = (replies / total_sent * 100) if total_sent > 0 else 0.0
+        open_rate = (opens / total_sent * 100) if total_sent > 0 else 0.0
+        
+        # KPI Display
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Avg. Reply Rate", f"{reply_rate:.1f}%", help="Based on statuses: Replied, Meeting Booked")
+        col2.metric("Open Rate", f"{open_rate:.1f}%", help="Based on statuses: Opened, Replied, Meeting Booked")
+        col3.metric("Total Sent", f"{total_sent}", help="Total profiles in Knowledge Base")
+        
+        st.divider()
+        
+        # Funnel (Cumulative)
+        # Opened = Opened + Replied + Booked + Ghosted
+        # Replied = Replied + Booked + Ghosted
+        opened_statuses = ["Opened", "Replied", "Meeting Booked", "Ghosted"]
+        replied_statuses = ["Replied", "Meeting Booked", "Ghosted"]
+        booked_statuses = ["Meeting Booked"]
+        
+        funnel_df = pd.DataFrame([
+            {"Stage": "1. Sent (Total)", "Count": len(df)},
+            {"Stage": "2. Opened (Cumulative)", "Count": len(df[df["status"].isin(opened_statuses)])},
+            {"Stage": "3. Replied (Cumulative)", "Count": len(df[df["status"].isin(replied_statuses)])},
+            {"Stage": "4. Meeting Booked", "Count": len(df[df["status"].isin(booked_statuses)])}
+        ])
+        
+        c = alt.Chart(funnel_df).mark_bar().encode(
+            x=alt.X('Stage', sort=["1. Sent (Total)", "2. Opened (Cumulative)", "3. Replied (Cumulative)", "4. Meeting Booked"]),
+            y='Count',
+            color=alt.value("#8b5cf6"),
+            tooltip=['Stage', 'Count']
+        ).interactive()
+        
+        st.altair_chart(c, use_container_width=True)
+        
+        st.divider()
+        
+        # Deep Dive Charts
+        c1, c2 = st.columns(2)
+        
+        # Helper for reply boolean (Ghosted counts as a reply initially)
+        df["is_reply"] = df["status"].isin(replied_statuses)
+        
+        with c1:
+            st.subheader("� Activity (Daily Volume)")
+            
+            if "timestamp" in df.columns:
+                try:
+                    df["date_only"] = pd.to_datetime(df["timestamp"]).dt.date
+                    daily_counts = df.groupby("date_only").size()
+                    st.bar_chart(daily_counts, color="#2563eb")
+                    st.caption("New prospects added per day.")
+                except Exception as e:
+                    st.error(f"Error parsing dates: {e}")
+            else:
+                st.info("No timestamp data available.")
+                
+        with c2:
+            st.subheader("📏 Response by Length")
+            # Calculate word count of saved email
+            def get_word_count(row):
+                msgs = row.get("messages", {})
+                if isinstance(msgs, dict) and msgs.get("email"):
+                    return len(msgs["email"].get("body", "").split())
+                return 0
+            
+            df["word_count"] = df.apply(get_word_count, axis=1)
+            
+            email_df = df[df["word_count"] > 0].copy()
+            
+            if not email_df.empty:
+                email_df["length_group"] = pd.cut(
+                    email_df["word_count"], 
+                    bins=[0, 50, 100, 9999], 
+                    labels=["Short (<50)", "Medium (50-100)", "Long (>100)"]
+                )
+                len_perf = email_df.groupby("length_group")["is_reply"].mean() * 100
+                st.bar_chart(len_perf, color="#10b981")
+                st.caption("Does brevity lead to more replies?")
+            else:
+                st.info("No email data to analyze.")
+

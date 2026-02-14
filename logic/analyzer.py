@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 from logic.llm_client import KaggleClient
 
 class ProspectAnalyzer:
-    def __init__(self, llm_url="https://d7b7-34-168-46-38.ngrok-free.app"):
+    def __init__(self, llm_url="https://aabb-34-26-185-21.ngrok-free.app"):
         self.client = KaggleClient(base_url=llm_url)
 
     def analyze_profile(self, raw_text):
