@@ -10,6 +10,7 @@ from logic.ingestion import ResumeParser, WebScraper
 from logic.analyzer import ProspectAnalyzer
 from logic.generator import MessageGenerator
 from logic.knowledge_base import KnowledgeBase
+from logic.templates import TemplateManager
 
 # Page Config
 st.set_page_config(
@@ -49,7 +50,7 @@ st.markdown("""
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
-    llm_url = st.text_input("Kaggle Endpoint URL", value="https://aabb-34-26-185-21.ngrok-free.app")
+    llm_url = st.text_input("Kaggle Endpoint URL", value="https://preocular-repudiatory-jeana.ngrok-free.dev")
     
     if st.button("Test Connection"):
         try:
@@ -68,6 +69,7 @@ with st.sidebar:
 analyzer = ProspectAnalyzer(llm_url=llm_url)
 generator = MessageGenerator(llm_url=llm_url)
 kb = KnowledgeBase()
+tm = TemplateManager()
 
 # Main Content
 st.title("🚀 Autonomous Outreach Assistant")
@@ -81,10 +83,31 @@ with st.expander("💼 Your Offering / Context (Required to prevent hallucinatio
         placeholder="e.g. A new SaaS tool for social media scheduling..."
     )
 
-tab1, tab2, tab3, tab4 = st.tabs(["📝 New Campaign", "🚀 Batch Processing (CSV)", "📚 Knowledge Base", "📊 Analytics"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 New Campaign", "🚀 Batch Processing (CSV)", "📚 Knowledge Base", "📊 Analytics", "📋 Templates"])
 
 with tab1:
     st.subheader("Import Prospect Data")
+    
+    # Template Selection
+    st.markdown("---")
+    st.markdown("### 🎨 Select Message Template")
+    template_names = tm.get_template_names()
+    template_options = ["Default (No Template)"] + list(template_names.values())
+    template_ids = [None] + list(template_names.keys())
+    
+    selected_template_name = st.selectbox(
+        "Choose generation style:",
+        template_options,
+        help="Templates control the tone, style, and approach of generated messages"
+    )
+    
+    # Get the selected template ID
+    selected_template_id = template_ids[template_options.index(selected_template_name)]
+    if selected_template_id:
+        template_info = tm.get_template(selected_template_id)
+        st.info(f"📝 **{template_info.get('name')}**: {template_info.get('description')}")
+    
+    st.markdown("---")
     
     input_method = st.radio("Choose Input Method", ["LinkedIn URL", "Upload Resume/File", "Paste Text"], horizontal=True)
     
@@ -171,8 +194,19 @@ with tab1:
                 )
                 st.session_state.similar_prospects = similar_prospects
                 
+                # Get template data if selected
+                template_data = tm.get_template(selected_template_id) if selected_template_id else None
+                if template_data:
+                    tm.mark_used(selected_template_id)
+                    st.session_state.used_template = selected_template_id
+                
                 with st.spinner(f"Generating Multi-Channel Campaigns (Found {len(similar_prospects)} similar profiles)..."):
-                    messages = generator.generate_campaign(analysis, my_offering, context_prospects=similar_prospects)
+                    messages = generator.generate_campaign(
+                        analysis, 
+                        my_offering, 
+                        context_prospects=similar_prospects,
+                        template_data=template_data
+                    )
                     
                     # Retry logic if generation fails (empty messages)
                     has_email = messages and messages.get("email", {}).get("body", "")
@@ -181,7 +215,12 @@ with tab1:
                     if not has_email and not has_linkedin:
                         st.warning("First attempt empty, retrying generation...")
                         time.sleep(2)
-                        messages = generator.generate_campaign(analysis, my_offering, context_prospects=similar_prospects)
+                        messages = generator.generate_campaign(
+                            analysis, 
+                            my_offering, 
+                            context_prospects=similar_prospects,
+                            template_data=template_data
+                        )
                     
                     st.session_state.generated_messages = messages
             else:
@@ -203,16 +242,65 @@ with tab1:
         with col2:
             st.subheader("✨ Generated Messages")
             
-            # A/B Test Button
-            if st.button("🔄 Generate A/B Variant"):
-                 with st.spinner("Creating Variant B..."):
-                    variant_msgs = generator.generate_campaign(
-                        st.session_state.analysis_result, 
-                        my_offering,
-                        context_prospects=st.session_state.get('similar_prospects'),
-                        variant_mode=True
-                    )
-                    st.session_state.generated_messages_b = variant_msgs
+            # Regenerate with Different Template
+            col_regen, col_ab = st.columns(2)
+            
+            with col_regen:
+                st.markdown("**🎨 Regenerate with Template:**")
+                regen_template_names = tm.get_template_names()
+                regen_template_options = ["Select Template..."] + list(regen_template_names.values())
+                regen_template_ids = [None] + list(regen_template_names.keys())
+                
+                regen_selected = st.selectbox(
+                    "Choose style",
+                    regen_template_options,
+                    key="regen_template_select",
+                    label_visibility="collapsed"
+                )
+                
+                regen_template_id = regen_template_ids[regen_template_options.index(regen_selected)]
+                
+                if st.button("🔄 Regenerate", disabled=(regen_template_id is None)):
+                    with st.spinner(f"Regenerating with {regen_selected}..."):
+                        regen_template_data = tm.get_template(regen_template_id)
+                        tm.mark_used(regen_template_id)
+                        
+                        regenerated_msgs = generator.generate_campaign(
+                            st.session_state.analysis_result, 
+                            my_offering,
+                            context_prospects=st.session_state.get('similar_prospects'),
+                            template_data=regen_template_data
+                        )
+                        st.session_state.generated_messages = regenerated_msgs
+                        st.session_state.used_template = regen_template_id
+                        st.rerun()
+            
+            with col_ab:
+                # A/B Test Button
+                st.markdown("**🧪 A/B Testing:**")
+                if st.button("Generate A/B Variant", key="ab_variant_btn"):
+                    with st.spinner("Creating Variant B..."):
+                        # Use the same template if one was used
+                        ab_template_data = None
+                        if st.session_state.get('used_template'):
+                            ab_template_data = tm.get_template(st.session_state.used_template)
+                        
+                        variant_msgs = generator.generate_campaign(
+                            st.session_state.analysis_result, 
+                            my_offering,
+                            context_prospects=st.session_state.get('similar_prospects'),
+                            variant_mode=True,
+                            template_data=ab_template_data
+                        )
+                        st.session_state.generated_messages_b = variant_msgs
+                        st.rerun()
+            
+            st.markdown("---")
+            
+            # Display offering context being used
+            with st.expander("📋 Offering Context Used in Messages", expanded=False):
+                st.markdown(f"**Your offering:** {my_offering}")
+                st.caption("Messages should align with this offering. If they don't, regenerate or check for warnings below.")
             
             # Show Messages (Tabs for A / B if exists)
             display_msgs = st.session_state.generated_messages
@@ -294,7 +382,14 @@ with tab1:
                             st.markdown(f'<a href="{insta_url}" target="_blank">Click to Open Profile</a>', unsafe_allow_html=True)
                             st.info("Opened profile. Copy/Paste the message manually.")
 
-                    st.info(f"Personalization Score: {display_msgs.get('analysis', {}).get('personalization_score', 'N/A')}")
+                    # Display analysis info
+                    analysis_data = display_msgs.get('analysis', {})
+                    
+                    # Show offering alignment warning if exists
+                    if analysis_data.get('offering_alignment_warning'):
+                        st.warning(analysis_data['offering_alignment_warning'])
+                    
+                    st.info(f"Personalization Score: {analysis_data.get('personalization_score', 'N/A')}")
                     
                     if st.button("Save to Knowledge Base"):
                         saved_url = url if input_method == "LinkedIn URL" else ""
@@ -309,6 +404,27 @@ with tab2:
     st.subheader("🚀 Batch Processing")
     
     st.info("Upload a CSV file containing a column named 'Linkedin URL' (or similar) to process multiple profiles at once.")
+    
+    # Template Selection for Batch
+    st.markdown("---")
+    st.markdown("### 🎨 Template for Batch (Optional)")
+    batch_template_names = tm.get_template_names()
+    batch_template_options = ["Default (No Template)"] + list(batch_template_names.values())
+    batch_template_ids = [None] + list(batch_template_names.keys())
+    
+    batch_selected_template = st.selectbox(
+        "Select template for all profiles:",
+        batch_template_options,
+        key="batch_template_select",
+        help="This template will be used for all profiles in the batch"
+    )
+    
+    batch_template_id = batch_template_ids[batch_template_options.index(batch_selected_template)]
+    if batch_template_id:
+        batch_template_info = tm.get_template(batch_template_id)
+        st.info(f"📝 **{batch_template_info.get('name')}**: {batch_template_info.get('description')}")
+    
+    st.markdown("---")
     
     batch_file = st.file_uploader("Upload CSV", type=["csv"])
     
@@ -429,30 +545,52 @@ with tab2:
                             hdr_name = candidate
                             break
                 
-                # Company and Role: look for "Company · Full-time/Part-time/Internship" pattern
+                # Company and Role: Handle grouped experiences (multiple roles at same company)
                 exp_start = cleaned_text.find("=== EXPERIENCE ===")
                 if exp_start >= 0:
-                    exp_text = cleaned_text[exp_start:exp_start+1500]
-                    company_match = re.search(
-                        r'([A-Za-z0-9][A-Za-z0-9\s&.,\'\-]+?)\s*·\s*(?:Full-time|Part-time|Internship|Contract|Freelance|Apprenticeship)',
-                        exp_text
-                    )
-                    if company_match:
-                        hdr_company = company_match.group(1).strip()
-                    
-                    # Role: line immediately before the company line
+                    exp_text = cleaned_text[exp_start:exp_start+2000]
                     exp_lines = exp_text.split('\n')
-                    for i, eline in enumerate(exp_lines):
-                        if '·' in eline and any(t in eline for t in ['Full-time', 'Part-time', 'Internship', 'Contract', 'Freelance', 'Apprenticeship']):
-                            if i > 0:
-                                role_candidate = exp_lines[i-1].strip()
-                                if role_candidate and not is_garbage(role_candidate) and role_candidate != "Experience":
-                                    hdr_role = role_candidate
-                            break
+                    
+                    # Pattern 1: Look for company name followed by duration, then role with "Present"
+                    # Example: "ajvc\n7 yrs 11 mos\nFounder and Managing Partner\nAug 2024 - Present"
+                    for i, line in enumerate(exp_lines):
+                        # Check if line looks like a duration (contains "yrs" or "mos")
+                        if any(x in line.lower() for x in ['yr', 'mo', 'month', 'year']):
+                            # Previous line might be company
+                            if i > 0 and i < len(exp_lines) - 2:
+                                potential_company = exp_lines[i-1].strip()
+                                # Next line should be role
+                                if i+1 < len(exp_lines):
+                                    potential_role = exp_lines[i+1].strip()
+                                    # Check if following line has "Present"
+                                    if i+2 < len(exp_lines) and "present" in exp_lines[i+2].lower():
+                                        if potential_company and not is_garbage(potential_company) and len(potential_company) < 50:
+                                            if potential_role and not is_garbage(potential_role):
+                                                hdr_company = potential_company
+                                                hdr_role = potential_role
+                                                break
+                    
+                    # Pattern 2: Standard "Company · Full-time/Part-time" pattern
+                    if hdr_company == "Unknown":
+                        company_match = re.search(
+                            r'([A-Za-z0-9][A-Za-z0-9\s&.,\'\-]+?)\s*·\s*(?:Full-time|Part-time|Internship|Contract|Freelance|Apprenticeship)',
+                            exp_text
+                        )
+                        if company_match:
+                            hdr_company = company_match.group(1).strip()
+                        
+                        # Role: line immediately before the company line
+                        for i, eline in enumerate(exp_lines):
+                            if '·' in eline and any(t in eline for t in ['Full-time', 'Part-time', 'Internship', 'Contract', 'Freelance', 'Apprenticeship']):
+                                if i > 0:
+                                    role_candidate = exp_lines[i-1].strip()
+                                    if role_candidate and not is_garbage(role_candidate) and role_candidate != "Experience":
+                                        hdr_role = role_candidate
+                                break
                 
                 return hdr_name, hdr_role, hdr_company
             
-            def process_profile(scraper, analyzer, generator, target_url, my_offering, status_text, idx, total):
+            def process_profile(scraper, analyzer, generator, target_url, my_offering, status_text, idx, total, template_data=None):
                 """Process a single profile. Returns a result dict."""
                 status_text.text(f"Processing ({idx+1}/{total}): {target_url}...")
                 
@@ -515,8 +653,13 @@ with tab2:
                         offering=my_offering
                     )
                     
-                    # 6. Generate messages with KB context
-                    msgs = generator.generate_campaign(analysis, my_offering, context_prospects=similar)
+                    # 6. Generate messages with KB context and template
+                    msgs = generator.generate_campaign(
+                        analysis, 
+                        my_offering, 
+                        context_prospects=similar,
+                        template_data=template_data
+                    )
                     
                     # Check for empty messages and retry generation
                     has_email = msgs and msgs.get("email", {}).get("body", "")
@@ -525,7 +668,12 @@ with tab2:
                     if not has_email and not has_linkedin:
                         status_text.text(f"Retrying message generation ({idx+1}/{total})...")
                         time.sleep(5)
-                        msgs = generator.generate_campaign(analysis, my_offering, context_prospects=similar)
+                        msgs = generator.generate_campaign(
+                            analysis, 
+                            my_offering, 
+                            context_prospects=similar,
+                            template_data=template_data
+                        )
 
                 has_email = msgs and msgs.get("email", {}).get("body", "")
                 has_linkedin = msgs and msgs.get("linkedin", "")
@@ -655,6 +803,11 @@ with tab2:
                 }
 
             try:
+                # Get template data if selected
+                batch_template_data = tm.get_template(batch_template_id) if batch_template_id else None
+                if batch_template_data:
+                    tm.mark_used(batch_template_id)
+                
                 # Initialize ONE browser session for the entire batch
                 status_text.text("Initializing browser session...")
                 scraper.init_browser()
@@ -670,7 +823,10 @@ with tab2:
                         time.sleep(delay)
 
                     try:
-                        result = process_profile(scraper, analyzer, generator, target_url, my_offering, status_text, i, total_rows)
+                        result = process_profile(
+                            scraper, analyzer, generator, target_url, my_offering, 
+                            status_text, i, total_rows, template_data=batch_template_data
+                        )
                         results.append(result)
                     except Exception as e:
                         results.append({
@@ -701,7 +857,8 @@ with tab2:
                         try:
                             retry_result = process_profile(
                                 scraper, analyzer, generator, target_url, my_offering, 
-                                status_text, retry_idx, len(failed_indices)
+                                status_text, retry_idx, len(failed_indices),
+                                template_data=batch_template_data
                             )
                             # Only replace if retry is better
                             retry_status = retry_result.get("Status", "")
@@ -718,6 +875,10 @@ with tab2:
                 scraper.close_browser()
                 
             status_text.text("Batch Processing Complete!")
+            
+            # Store results in session state for regeneration
+            st.session_state.batch_results = results
+            st.session_state.batch_offering = my_offering
             
             # Auto-save successful profiles to Knowledge Base
             saved_count = 0
@@ -758,6 +919,88 @@ with tab2:
                     file_name='outreach_results.csv',
                     mime='text/csv',
                 )
+    
+    # Batch Regeneration Feature
+    if st.session_state.get('batch_results'):
+        st.markdown("---")
+        st.subheader("🔄 Regenerate Batch Messages with Different Template")
+        
+        col_regen1, col_regen2, col_regen3 = st.columns([2, 2, 1])
+        
+        with col_regen1:
+            regen_batch_template_names = tm.get_template_names()
+            regen_batch_template_options = ["Select Template..."] + list(regen_batch_template_names.values())
+            regen_batch_template_ids = [None] + list(regen_batch_template_names.keys())
+            
+            regen_batch_selected = st.selectbox(
+                "Choose template to regenerate all messages:",
+                regen_batch_template_options,
+                key="regen_batch_template_select"
+            )
+            
+            regen_batch_template_id = regen_batch_template_ids[regen_batch_template_options.index(regen_batch_selected)]
+        
+        with col_regen2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔄 Regenerate All Messages", disabled=(regen_batch_template_id is None), key="batch_regen_btn"):
+                with st.spinner(f"Regenerating {len(st.session_state.batch_results)} profiles with {regen_batch_selected}..."):
+                    regen_template_data = tm.get_template(regen_batch_template_id)
+                    tm.mark_used(regen_batch_template_id)
+                    
+                    regenerated_results = []
+                    regen_progress = st.progress(0)
+                    regen_status = st.empty()
+                    
+                    for idx, result in enumerate(st.session_state.batch_results):
+                        regen_status.text(f"Regenerating {idx+1}/{len(st.session_state.batch_results)}...")
+                        
+                        # Only regenerate if we have analysis data
+                        if result.get("Status") in ["Success", "Partial - Messages Empty"]:
+                            # Reconstruct analysis from stored data
+                            analysis = {
+                                "name": result.get("Name", ""),
+                                "company": result.get("Company", ""),
+                                "role": result.get("Role", ""),
+                            }
+                            
+                            try:
+                                # Generate new messages with template
+                                new_msgs = generator.generate_campaign(
+                                    analysis,
+                                    st.session_state.batch_offering,
+                                    template_data=regen_template_data
+                                )
+                                
+                                # Update result with new messages
+                                result["Email Subject"] = new_msgs.get("email", {}).get("subject", "") if new_msgs else ""
+                                result["Email Body"] = new_msgs.get("email", {}).get("body", "") if new_msgs else ""
+                                result["LinkedIn Msg"] = new_msgs.get("linkedin", "") if new_msgs else ""
+                                result["WhatsApp Msg"] = new_msgs.get("whatsapp", "") if new_msgs else ""
+                                result["SMS Msg"] = new_msgs.get("sms", "") if new_msgs else ""
+                                
+                                # Update status
+                                has_email = new_msgs and new_msgs.get("email", {}).get("body", "")
+                                has_linkedin = new_msgs and new_msgs.get("linkedin", "")
+                                result["Status"] = "Success" if (has_email or has_linkedin) else "Partial - Messages Empty"
+                            except Exception as e:
+                                result["Status"] = f"Regen Error: {str(e)}"
+                        
+                        regenerated_results.append(result)
+                        regen_progress.progress((idx + 1) / len(st.session_state.batch_results))
+                        
+                        # Small delay to avoid rate limiting
+                        time.sleep(1)
+                    
+                    # Update session state with regenerated results
+                    st.session_state.batch_results = regenerated_results
+                    regen_status.text("Regeneration complete!")
+                    st.success(f"✅ Regenerated all messages with template: {regen_batch_selected}")
+                    time.sleep(1)
+                    st.rerun()
+        
+        with col_regen3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.caption(f"📊 {len(st.session_state.batch_results)} profiles")
 
 with tab3:
     st.subheader("📚 Knowledge Base")
@@ -1031,3 +1274,239 @@ with tab4:
             else:
                 st.info("No email data to analyze.")
 
+with tab5:
+    st.header("📋 Template Management")
+    st.markdown("Create and manage message generation templates to control the tone and style of your outreach.")
+    
+    # Template Action Selector
+    template_action = st.radio(
+        "Choose Action",
+        ["View Templates", "Create New Template", "Edit Template", "Delete Template"],
+        horizontal=True
+    )
+    
+    st.divider()
+    
+    if template_action == "View Templates":
+        st.subheader("📚 All Templates")
+        
+        templates = tm.get_all_templates()
+        
+        if not templates:
+            st.info("No templates found. Create your first template!")
+        else:
+            for template_id, template_data in templates.items():
+                with st.expander(f"📄 {template_data.get('name', template_id)}", expanded=False):
+                    col_info, col_meta = st.columns([2, 1])
+                    
+                    with col_info:
+                        st.markdown(f"**Description:** {template_data.get('description', 'N/A')}")
+                        st.markdown(f"**Tone:** {template_data.get('tone', 'N/A')}")
+                        st.markdown(f"**Message Length:** {template_data.get('message_length', 'N/A')}")
+                        st.markdown(f"**CTA Style:** {template_data.get('cta_style', 'N/A')}")
+                        st.markdown(f"**Personalization Level:** {template_data.get('personalization_level', 'N/A')}")
+                        
+                        st.markdown("**Style Instructions:**")
+                        st.text(template_data.get('style_instructions', 'N/A'))
+                    
+                    with col_meta:
+                        created = template_data.get('created_at', 'Unknown')
+                        last_used = template_data.get('last_used', 'Never')
+                        st.caption(f"**Created:** {created[:10] if created != 'Unknown' else 'Unknown'}")
+                        st.caption(f"**Last Used:** {last_used[:10] if last_used and last_used != 'Never' else 'Never'}")
+    
+    elif template_action == "Create New Template":
+        st.subheader("➕ Create New Template")
+        
+        with st.form("create_template_form"):
+            new_id = st.text_input(
+                "Template ID*",
+                placeholder="e.g., my_custom_template",
+                help="Unique identifier (use lowercase, underscores, no spaces)"
+            )
+            
+            new_name = st.text_input(
+                "Template Name*",
+                placeholder="e.g., Friendly Consultant"
+            )
+            
+            new_description = st.text_area(
+                "Description*",
+                placeholder="Brief description of when to use this template",
+                height=80
+            )
+            
+            new_style_instructions = st.text_area(
+                "Style Instructions*",
+                placeholder="Detailed instructions on tone, approach, structure...\n- Point 1\n- Point 2",
+                height=150,
+                help="These instructions guide the AI on how to write the message"
+            )
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                new_message_length = st.text_input(
+                    "Message Length Guideline",
+                    value="4-6 lines for short channels, 8-10 lines for email"
+                )
+                
+                new_tone = st.text_input(
+                    "Tone",
+                    value="Professional, friendly"
+                )
+            
+            with col2:
+                new_personalization = st.text_input(
+                    "Personalization Level",
+                    value="High - weave in personal details"
+                )
+                
+                new_cta_style = st.text_input(
+                    "CTA Style",
+                    value="Soft invitation to connect"
+                )
+            
+            submit_create = st.form_submit_button("✅ Create Template")
+            
+            if submit_create:
+                if not new_id or not new_name or not new_description or not new_style_instructions:
+                    st.error("Please fill in all required fields (marked with *)")
+                elif not new_id.replace('_', '').isalnum():
+                    st.error("Template ID must contain only letters, numbers, and underscores")
+                else:
+                    template_data = {
+                        "name": new_name,
+                        "description": new_description,
+                        "style_instructions": new_style_instructions,
+                        "message_length": new_message_length,
+                        "tone": new_tone,
+                        "personalization_level": new_personalization,
+                        "cta_style": new_cta_style
+                    }
+                    
+                    success, message = tm.create_template(new_id, template_data)
+                    
+                    if success:
+                        st.success(f"✅ {message}")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {message}")
+    
+    elif template_action == "Edit Template":
+        st.subheader("✏️ Edit Template")
+        
+        templates = tm.get_all_templates()
+        
+        if not templates:
+            st.info("No templates available to edit. Create one first!")
+        else:
+            template_to_edit = st.selectbox(
+                "Select Template to Edit",
+                list(templates.keys()),
+                format_func=lambda x: templates[x].get('name', x)
+            )
+            
+            current_template = templates[template_to_edit]
+            
+            with st.form("edit_template_form"):
+                edit_name = st.text_input(
+                    "Template Name*",
+                    value=current_template.get('name', '')
+                )
+                
+                edit_description = st.text_area(
+                    "Description*",
+                    value=current_template.get('description', ''),
+                    height=80
+                )
+                
+                edit_style_instructions = st.text_area(
+                    "Style Instructions*",
+                    value=current_template.get('style_instructions', ''),
+                    height=150
+                )
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    edit_message_length = st.text_input(
+                        "Message Length Guideline",
+                        value=current_template.get('message_length', '')
+                    )
+                    
+                    edit_tone = st.text_input(
+                        "Tone",
+                        value=current_template.get('tone', '')
+                    )
+                
+                with col2:
+                    edit_personalization = st.text_input(
+                        "Personalization Level",
+                        value=current_template.get('personalization_level', '')
+                    )
+                    
+                    edit_cta_style = st.text_input(
+                        "CTA Style",
+                        value=current_template.get('cta_style', '')
+                    )
+                
+                submit_edit = st.form_submit_button("💾 Save Changes")
+                
+                if submit_edit:
+                    if not edit_name or not edit_description or not edit_style_instructions:
+                        st.error("Please fill in all required fields (marked with *)")
+                    else:
+                        template_data = {
+                            "name": edit_name,
+                            "description": edit_description,
+                            "style_instructions": edit_style_instructions,
+                            "message_length": edit_message_length,
+                            "tone": edit_tone,
+                            "personalization_level": edit_personalization,
+                            "cta_style": edit_cta_style
+                        }
+                        
+                        success, message = tm.update_template(template_to_edit, template_data)
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {message}")
+    
+    elif template_action == "Delete Template":
+        st.subheader("🗑️ Delete Template")
+        
+        templates = tm.get_all_templates()
+        
+        if not templates:
+            st.info("No templates available to delete.")
+        else:
+            template_to_delete = st.selectbox(
+                "Select Template to Delete",
+                list(templates.keys()),
+                format_func=lambda x: templates[x].get('name', x)
+            )
+            
+            st.warning(f"⚠️ You are about to delete: **{templates[template_to_delete].get('name')}**")
+            st.markdown(f"*{templates[template_to_delete].get('description')}*")
+            
+            col1, col2, col3 = st.columns([1, 1, 2])
+            
+            with col1:
+                if st.button("🗑️ Confirm Delete", type="primary"):
+                    success, message = tm.delete_template(template_to_delete)
+                    
+                    if success:
+                        st.success(f"✅ {message}")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {message}")
+            
+            with col2:
+                if st.button("❌ Cancel"):
+                    st.info("Deletion cancelled.")

@@ -1,0 +1,57 @@
+{
+  "professional_direct": {
+    "name": "Professional & Direct",
+    "description": "Straightforward, business-focused approach with clear value proposition",
+    "style_instructions": "\n- Be professional and direct\n- Lead with value proposition\n- Keep tone business-focused\n- Use concrete data and metrics when possible\n- Clear, specific call-to-action\n            ",
+    "message_length": "4-6 lines for short channels, 8-10 lines for email",
+    "tone": "Professional, confident, results-oriented",
+    "personalization_level": "Moderate - mention key achievements and pain points",
+    "cta_style": "Direct ask for meeting/call",
+    "created_at": "2026-02-14T23:12:51.335303",
+    "last_used": "2026-02-14T23:28:45.136108"
+  },
+  "warm_conversational": {
+    "name": "Warm & Conversational",
+    "description": "Friendly, relationship-focused approach that builds rapport",
+    "style_instructions": "\n- Start with genuine compliment or shared interest\n- Use conversational language (contractions, friendly tone)\n- Build rapport before pitching\n- Show authentic interest in their work\n- Soft, low-pressure call-to-action\n            ",
+    "message_length": "5-7 lines for short channels, 10-12 lines for email",
+    "tone": "Friendly, warm, authentic, relationship-focused",
+    "personalization_level": "High - weave in personal details, interests, and recent activity",
+    "cta_style": "Soft suggestion or question",
+    "created_at": "2026-02-14T23:12:51.335316",
+    "last_used": "2026-02-14T23:51:12.414448"
+  },
+  "problem_agitation": {
+    "name": "Problem-Agitation-Solution",
+    "description": "Highlight pain points, amplify urgency, then present solution",
+    "style_instructions": "\n- Open with a pain point they're likely facing\n- Agitate by showing consequences or missed opportunities\n- Present your solution as the answer\n- Use emotional language that resonates with frustration\n- Strong, urgent call-to-action\n            ",
+    "message_length": "5-7 lines for short channels, 9-11 lines for email",
+    "tone": "Empathetic but urgent, solution-focused",
+    "personalization_level": "High - identify specific pain points from their profile",
+    "cta_style": "Urgent invitation to solve the problem",
+    "created_at": "2026-02-14T23:12:51.335321",
+    "last_used": null
+  },
+  "question_based": {
+    "name": "Question-Based Opener",
+    "description": "Start with thought-provoking question to drive engagement",
+    "style_instructions": "\n- Open with a relevant, thought-provoking question\n- Make them curious or self-reflective\n- Follow up with context showing you understand their situation\n- Present solution naturally as answer to the question\n- CTA should be another question or invitation to discuss\n            ",
+    "message_length": "4-6 lines for short channels, 8-10 lines for email",
+    "tone": "Curious, consultative, thought-provoking",
+    "personalization_level": "High - question must be specific to their role/industry",
+    "cta_style": "Question or invitation to explore further",
+    "created_at": "2026-02-14T23:12:51.335326",
+    "last_used": null
+  },
+  "value_first": {
+    "name": "Value-First (Give Before Ask)",
+    "description": "Lead with free value, insight, or resource before any ask",
+    "style_instructions": "\n- Start by offering something valuable for free (insight, resource, tip)\n- Show expertise through the value you provide\n- Build credibility before pitching\n- Make the ask secondary to the value provided\n- Low-pressure CTA that continues value exchange\n            ",
+    "message_length": "5-7 lines for short channels, 10-12 lines for email",
+    "tone": "Generous, helpful, consultative, expert",
+    "personalization_level": "Moderate to High - value must be relevant to their needs",
+    "cta_style": "Offer more value or continue conversation",
+    "created_at": "2026-02-14T23:12:51.335330",
+    "last_used": "2026-02-14T23:21:59.551371"
+  }
+}

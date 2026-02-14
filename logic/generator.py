@@ -7,14 +7,15 @@ logger = logging.getLogger(__name__)
 from logic.llm_client import KaggleClient
 
 class MessageGenerator:
-    def __init__(self, llm_url="https://aabb-34-26-185-21.ngrok-free.app"):
+    def __init__(self, llm_url="https://preocular-repudiatory-jeana.ngrok-free.dev"):
         self.client = KaggleClient(base_url=llm_url)
 
-    def generate_campaign(self, profile_data, my_offering, context_prospects=None, variant_mode=False):
+    def generate_campaign(self, profile_data, my_offering, context_prospects=None, variant_mode=False, template_data=None):
         """
         Generates 5-channel outreach messages based on the analyzed profile.
         If context_prospects is provided, uses them as "success stories".
         If variant_mode is True, generates an alternative "B" version.
+        If template_data is provided, uses it to customize the generation style.
         """
         
         context_str = ""
@@ -85,22 +86,51 @@ class MessageGenerator:
 
         variant_instruction = ""
         if variant_mode:
-            variant_instruction = "IMPORTANT: This is an A/B test variant. Try a DIFFERENT angle than usual (e.g., if you usually lead with value, lead with a question, or be more direct)."
+            variant_instruction = "\n\nIMPORTANT: This is an A/B test variant. Try a DIFFERENT angle than usual (e.g., if you usually lead with value, lead with a question, or be more direct)."
+
+        # Build template-specific instructions
+        template_instruction = ""
+        message_length_rule = "4-5 lines minimum (not counting greeting/signature)"
+        tone_rule = "Professional yet conversational"
+        personalization_rule = "Weave them into a narrative"
+        cta_rule = "Clear next step"
+        
+        if template_data:
+            template_name = template_data.get("name", "Custom Template")
+            template_instruction = f"\n=== TEMPLATE: {template_name} ===\n"
+            template_instruction += f"DESCRIPTION: {template_data.get('description', '')}\n"
+            template_instruction += f"\nSTYLE GUIDELINES:\n{template_data.get('style_instructions', '')}\n"
+            
+            # Override defaults with template specs
+            message_length_rule = template_data.get("message_length", message_length_rule)
+            tone_rule = template_data.get("tone", tone_rule)
+            personalization_rule = template_data.get("personalization_level", personalization_rule)
+            cta_rule = template_data.get("cta_style", cta_rule)
 
         system_prompt = f"""
         You are a world-class SDR and Copywriter.
         Your task is to generate hyper-personalized outreach messages that feel warm and well-researched.
+        {template_instruction}
         
-        OFFERING CONTEXT:
+        ╔═══════════════════════════════════════════════════════════════╗
+        ║  OFFERING CONTEXT (THIS IS WHAT YOU ARE SELLING - USE THIS!) ║
+        ╚═══════════════════════════════════════════════════════════════╝
         "{my_offering}"
         
-        CRITICAL RULES:
-        1. MESSAGE LENGTH: ALL platform messages (LinkedIn, WhatsApp, SMS, Instagram) MUST be 4-5 lines minimum (not counting greeting/signature).
+        🚨 CRITICAL ANTI-HALLUCINATION RULES:
+        1. YOU MUST use the OFFERING CONTEXT above in your messages. Do NOT make up products, services, or companies.
+        2. DO NOT mention "DevOps", "infrastructure", "AWS", "talent platform", or ANY other service unless it's explicitly in the OFFERING CONTEXT.
+        3. The example below uses "AI-driven talent platform" - THIS IS JUST AN EXAMPLE. Replace it with the actual OFFERING CONTEXT.
+        4. Connect the prospect's profile to the OFFERING CONTEXT specifically. Explain why YOUR offering (from context) helps THEIR situation.
+        
+        GENERATION RULES:
+        1. MESSAGE LENGTH: {message_length_rule}
            - Each message should be comprehensive and compelling. Do NOT generate 1-liners.
-        2. NO FLUFF: Don't just list facts. Weave them into a narrative. 
-        3. INTEGRATION: You must fluidly bridge the prospect's specific details (pain points, recent activity) with the 'OFFERING CONTEXT'. Do not just paste the offering; explain *why* it matters to *them*.
-        4. TONE: Professional yet conversational.
-        5. CALL TO ACTION: Clear next step.
+        2. PERSONALIZATION: {personalization_rule}
+        3. OFFERING INTEGRATION: Bridge prospect's details (pain points, activity) with the OFFERING CONTEXT above. Make it specific to them.
+        4. TONE: {tone_rule}
+        5. CALL TO ACTION: {cta_rule}
+        {variant_instruction}
         {context_str}
         """
 
@@ -132,14 +162,23 @@ class MessageGenerator:
         }, indent=2)
 
         user_prompt = f"""
-        EXAMPLE INPUT PROFILE:
+        IMPORTANT REMINDER: The example below is ONLY for format reference. DO NOT copy the offering from the example.
+        You MUST use the OFFERING CONTEXT from the system prompt in your actual messages.
+        
+        EXAMPLE INPUT PROFILE (for format reference only):
         {example_profile}
         
-        EXAMPLE JSON OUTPUT:
+        EXAMPLE JSON OUTPUT (for format reference only - DO NOT copy the offering):
         {example_output}
+        
+        ═══════════════════════════════════════════════════════════
+        NOW GENERATE FOR THE REAL PROFILE BELOW:
+        ═══════════════════════════════════════════════════════════
         
         REAL INPUT PROFILE:
         {json.dumps(profile_data, indent=2)}
+        
+        Remember: Use the OFFERING CONTEXT from the system prompt, NOT the example offering!
         
         REAL JSON OUTPUT:
         """
@@ -154,6 +193,8 @@ class MessageGenerator:
             
             json_res = self.client.extract_json(response_text)
             if json_res:
+                # Add offering validation warning
+                json_res = self._add_offering_validation(json_res, my_offering)
                 return json_res
 
             # Fallback or return raw text if that's what we got (though analyzer expects dict)
@@ -161,3 +202,42 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             return {"error": str(e)}
+    
+    def _add_offering_validation(self, generated_messages, offering_context):
+        """
+        Add a validation warning if generated content doesn't seem to match the offering.
+        This helps detect hallucinations.
+        """
+        # Common hallucination keywords that shouldn't appear unless in offering
+        hallucination_keywords = [
+            "devops", "infrastructure", "aws", "cloud services", "terraform",
+            "kubernetes", "docker", "ci/cd pipeline", "jenkins", 
+            "talent platform", "recruitment", "hiring platform"
+        ]
+        
+        offering_lower = offering_context.lower()
+        
+        # Get all message text
+        all_text = ""
+        if isinstance(generated_messages, dict):
+            email_body = generated_messages.get("email", {}).get("body", "") if isinstance(generated_messages.get("email"), dict) else ""
+            linkedin = generated_messages.get("linkedin", "")
+            all_text = (email_body + " " + linkedin).lower()
+        
+        # Check for hallucinations
+        hallucinated_terms = []
+        for keyword in hallucination_keywords:
+            if keyword in all_text and keyword not in offering_lower:
+                hallucinated_terms.append(keyword)
+        
+        # Add warning if hallucinations detected
+        if hallucinated_terms:
+            if "analysis" not in generated_messages:
+                generated_messages["analysis"] = {}
+            generated_messages["analysis"]["offering_alignment_warning"] = (
+                f"⚠️ Detected terms not in offering: {', '.join(hallucinated_terms)}. "
+                "Please verify the message aligns with your actual offering."
+            )
+            logger.warning(f"Possible hallucination detected: {hallucinated_terms}")
+        
+        return generated_messages
