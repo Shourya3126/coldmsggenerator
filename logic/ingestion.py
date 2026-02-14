@@ -226,6 +226,20 @@ class WebScraper:
 
     def scrape_url(self, url):
         """Decides whether to use simple requests or Selenium based on the URL."""
+        # Validate and sanitize URL
+        if not url or not isinstance(url, str):
+            return "Error: Invalid URL provided"
+        
+        url = url.strip()
+        
+        # Add protocol if missing
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        
+        # Basic URL validation
+        if not ('.' in url and len(url) > 10):
+            return f"Error: URL appears invalid: {url}"
+        
         if "linkedin.com/in/" in url:
             return self.scrape_linkedin_selenium(url)
         else:
@@ -258,9 +272,24 @@ class WebScraper:
         import pickle
         import os
 
+        # Validate URL before proceeding
+        if not url or not isinstance(url, str):
+            return "Error: Invalid URL provided"
+        
+        url = url.strip()
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        
+        if "linkedin.com/in/" not in url:
+            return f"Error: Not a valid LinkedIn profile URL: {url}"
+
         # Initialize browser if not already done
-        if not self.driver:
-            self.init_browser()
+        try:
+            if not self.driver:
+                self.init_browser()
+        except Exception as e:
+            logger.error(f"Failed to initialize browser: {e}")
+            return f"Error: Could not initialize browser. {str(e)}"
 
         full_text_content = ""
         
