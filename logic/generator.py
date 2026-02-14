@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 from logic.llm_client import KaggleClient
 
 class MessageGenerator:
-    def __init__(self, llm_url="https://aabb-34-26-185-21.ngrok-free.app"):
+    def __init__(self, llm_url="https://ununited-laudable-anya.ngrok-free.dev"):
         self.client = KaggleClient(base_url=llm_url)
 
     def generate_campaign(self, profile_data, my_offering, context_prospects=None, variant_mode=False):

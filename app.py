@@ -49,7 +49,7 @@ st.markdown("""
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
-    llm_url = st.text_input("Kaggle Endpoint URL", value="https://aabb-34-26-185-21.ngrok-free.app")
+    llm_url = st.text_input("Kaggle Endpoint URL", value="https://ununited-laudable-anya.ngrok-free.dev")
     
     if st.button("Test Connection"):
         try:
@@ -85,107 +85,188 @@ tab1, tab2, tab3, tab4 = st.tabs(["📝 New Campaign", "🚀 Batch Processing (C
 
 with tab1:
     st.subheader("Import Prospect Data")
+    st.success("💡 **Pro Tip**: Provide multiple sources (LinkedIn + Resume + Text) for the most comprehensive analysis! The AI will intelligently merge all data about the same person.")
     
-    input_method = st.radio("Choose Input Method", ["LinkedIn URL", "Upload Resume/File", "Paste Text"], horizontal=True)
-    
-    raw_text = ""
-    
-    process_btn = False
-    
-    if input_method == "LinkedIn URL":
-        url = st.text_input("Enter LinkedIn Profile URL")
-        process_btn = st.button("Analyze Profile")
-        if process_btn and url:
-            with st.spinner("Scraping LinkedIn (this may take a moment)..."):
-                scraper = WebScraper()
-                raw_text = scraper.scrape_url(url)
-                if "Error" in raw_text or "Auth Wall" in raw_text:
-                    st.warning("Could not scrape fully. Please copy/paste the profile text/PDF if possible.")
-                    st.text_area("Scraped Content (Debug)", raw_text, height=100)
-                else:
-                    st.success("Profile scraped successfully!")
-
-    elif input_method == "Upload Resume/File":
-        uploaded_file = st.file_uploader("Upload PDF or DOCX", type=["pdf", "docx"])
-        if uploaded_file:
-            process_btn = st.button("Analyze File")
-            if process_btn:
-                file_type = uploaded_file.name.split('.')[-1].lower()
-                with st.spinner("Parsing file..."):
-                    raw_text = ResumeParser.extract_text(uploaded_file, file_type)
-                    st.success("File parsed!")
-
-    elif input_method == "Paste Text":
-        col_paste, col_mock = st.columns([3, 1])
-        with col_paste:
-            raw_text = st.text_area("Paste Profile Text / Bio / Notes", height=200)
-        with col_mock:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            if st.button("🎲 Load Mock Profile"):
-                raw_text = """
-                Name: Sarah Chen
-                Role: VP of Product at FinTech Solutions (Series B)
-                About: 
-                Passionate about building financial tools that actually help people. 
-                Recently posted about the challenges of scaling remote product teams.
-                Loves hiking and specialty coffee.
-                Communication Style: Highly direct, uses emojis occasionally ☕️, focused on metrics and efficiency.
-                Education: Stanford MBA.
-                """
-                st.session_state.raw_text_input = raw_text # Store if needed
-                st.info("Mock data loaded. Click 'Analyze Text'.")
+    # Troubleshooting expander
+    with st.expander("❓ Need Help? Common Issues & Tips"):
+        st.markdown("""
+        **Best Results:**
+        - 🎯 **Combine multiple sources**: LinkedIn + Resume gives the most complete profile
+        - 📄 The AI automatically merges education from resume with experience from LinkedIn
+        - ✨ More data = better personalization!
         
-        process_btn = st.button("Analyze Text")
+        **LinkedIn Scraping Issues:**
+        - ✅ Make sure the URL is complete: `https://www.linkedin.com/in/username`
+        - ✅ First time? You'll need to log into LinkedIn manually in the browser window
+        - ✅ LinkedIn scraping requires Microsoft Edge browser
+        - ⚠️ If scraping fails, just paste the profile text or upload a resume instead!
+        
+        **Using Multiple Sources:**
+        - 📋 LinkedIn: Best for current role, company, recent activity
+        - 📄 Resume: Best for complete work history, education, skills
+        - ✍️ Text: Add any additional notes or context
+        - 📝 Include recent activity, posts, or communication style observations in text
+        - 🔄 If one source fails, the others will still work!
+        """)
+    
+    # All three input methods shown at once
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("**🔗 LinkedIn Profile**")
+        linkedin_url = st.text_input(
+            "LinkedIn Profile URL (optional)", 
+            placeholder="https://linkedin.com/in/username",
+            help="Enter a full LinkedIn profile URL (e.g., https://www.linkedin.com/in/johndoe)"
+        )
+        
+        st.markdown("**📄 Resume / CV**")
+        uploaded_file = st.file_uploader("Upload PDF or DOCX (optional)", type=["pdf", "docx"])
+    
+    with col2:
+        st.markdown("**📝 Additional Text**")
+        text_input = st.text_area(
+            "Paste profile text, bio, notes, or any additional info (optional)", 
+            height=150,
+            placeholder="E.g., Recent posts, interests, communication style observations..."
+        )
+        
+        if st.button("🎲 Load Mock Profile"):
+            st.session_state.mock_text = """
+            Name: Sarah Chen
+            Role: VP of Product at FinTech Solutions (Series B)
+            About: 
+            Passionate about building financial tools that actually help people. 
+            Recently posted about the challenges of scaling remote product teams.
+            Loves hiking and specialty coffee.
+            Communication Style: Highly direct, uses emojis occasionally ☕️, focused on metrics and efficiency.
+            Education: Stanford MBA.
+            """
+            st.info("Mock data loaded! It will be used when you click Analyze.")
+    
+    # Use mock text if it exists
+    if 'mock_text' in st.session_state and not text_input:
+        text_input = st.session_state.mock_text
+    
+    # Single analyze button
+    process_btn = st.button("🚀 Analyze Prospect", type="primary", use_container_width=True)
 
     # Analyze Button Logic
     if process_btn:
-        if not raw_text:
-            st.warning("Please provide input data.")
-        # Logic Trigger
-        if raw_text: # This implicitly means process_btn is also True because it's inside the outer if
+        # Check if at least one data source is provided
+        has_linkedin = linkedin_url and linkedin_url.strip()
+        has_resume = uploaded_file is not None
+        has_text = text_input and text_input.strip()
+        
+        if not (has_linkedin or has_resume or has_text):
+            st.warning("⚠️ Please provide at least one data source (LinkedIn URL, Resume, or Text).")
+        else:
             # Reset previous results to avoid stale data
             st.session_state.analysis_result = None
             st.session_state.generated_messages = None
             st.session_state.generated_messages_b = None
             
-            with st.spinner("Analyzing Psychological Profile & Communication Style..."):
-                analysis = analyzer.analyze_profile(raw_text)
-                st.session_state.analysis_result = analysis
+            # Collect data from all sources
+            combined_text = ""
+            data_sources_used = []
             
-            # DEBUG: Show what we actually scraped to build trust
-            with st.expander("🕵️‍♂️ Debug: Scraped Content (What the AI saw)", expanded=False):
-                st.text_area("Raw Text", value=raw_text, height=150)
-
-            if "error" not in analysis:
-                # Check for similar prospects in KB
-                company = analysis.get("company")
-                industry = analysis.get("industry")
-                role = analysis.get("role")
+            # 1. Process LinkedIn URL if provided
+            if has_linkedin:
+                with st.spinner("🔗 Scraping LinkedIn profile..."):
+                    try:
+                        scraper = WebScraper()
+                        linkedin_text = scraper.scrape_url(linkedin_url)
+                        
+                        if "Error" in linkedin_text or "Auth Wall" in linkedin_text:
+                            st.warning(f"⚠️ LinkedIn scraping failed")
+                            with st.expander("🔍 See Error Details"):
+                                st.error(linkedin_text)
+                            st.info("💡 Don't worry! Analysis will continue with other provided data.")
+                        else:
+                            combined_text += f"\n\n=== LINKEDIN PROFILE DATA ===\n{linkedin_text}\n"
+                            data_sources_used.append("LinkedIn Profile")
+                            st.success("✅ LinkedIn profile scraped successfully!")
+                    except Exception as e:
+                        st.warning(f"⚠️ LinkedIn scraping encountered an error")
+                        with st.expander("🔍 See Error Details"):
+                            st.error(f"Exception: {str(e)}")
+                        st.info("💡 Analysis will continue with other provided data.")
+            
+            # 2. Process Resume if provided
+            if has_resume:
+                with st.spinner("📄 Parsing resume..."):
+                    file_type = uploaded_file.name.split('.')[-1].lower()
+                    resume_text = ResumeParser.extract_text(uploaded_file, file_type)
+                    if "Error" in resume_text:
+                        st.warning(f"⚠️ Resume parsing failed: {resume_text}")
+                    else:
+                        combined_text += f"\n\n=== RESUME / CV DATA ===\n{resume_text}\n"
+                        data_sources_used.append("Resume/CV")
+                        st.success("✅ Resume parsed successfully!")
+            
+            # 3. Add text input if provided
+            if has_text:
+                combined_text += f"\n\n=== ADDITIONAL TEXT / NOTES ===\n{text_input}\n"
+                data_sources_used.append("Text Input")
+                st.success("✅ Text input added!")
+            
+            # Show what data sources were used
+            if data_sources_used:
+                if len(data_sources_used) > 1:
+                    st.success(f"✅ **{len(data_sources_used)} data sources combined**: {', '.join(data_sources_used)}")
+                    st.info("💡 The AI will merge all information about the same person into one comprehensive profile.")
+                else:
+                    st.info(f"📊 Data source: {', '.join(data_sources_used)}")
+            
+            # Analyze with combined data
+            if combined_text.strip():
+                # Store data sources in session state
+                st.session_state.data_sources_used = data_sources_used
                 
-                # Query KB with offering-aware logic
-                similar_prospects = kb.find_similar(
-                    company=company, 
-                    industry=industry, 
-                    role=role, 
-                    offering=my_offering
-                )
-                st.session_state.similar_prospects = similar_prospects
+                with st.spinner("🧠 Analyzing & combining data from all sources..."):
+                    analysis = analyzer.analyze_profile(combined_text)
+                    st.session_state.analysis_result = analysis
                 
-                with st.spinner(f"Generating Multi-Channel Campaigns (Found {len(similar_prospects)} similar profiles)..."):
-                    messages = generator.generate_campaign(analysis, my_offering, context_prospects=similar_prospects)
+                # DEBUG: Show what we actually scraped to build trust
+                expander_text = "🕵️‍♂️ View Combined Data (What the AI analyzed)" if len(data_sources_used) > 1 else "🕵️‍♂️ View Source Data"
+                with st.expander(expander_text, expanded=False):
+                    st.info(f"**Sources used**: {', '.join(data_sources_used)}")
+                    st.text_area("Combined Text from All Sources", value=combined_text, height=250, disabled=True)
+                    if len(data_sources_used) > 1:
+                        st.caption("👆 This shows all data merged together before AI analysis")
+                
+                if "error" not in analysis:
+                    # Check for similar prospects in KB
+                    company = analysis.get("company")
+                    industry = analysis.get("industry")
+                    role = analysis.get("role")
                     
-                    # Retry logic if generation fails (empty messages)
-                    has_email = messages and messages.get("email", {}).get("body", "")
-                    has_linkedin = messages and messages.get("linkedin", "")
+                    # Query KB with offering-aware logic
+                    similar_prospects = kb.find_similar(
+                        company=company, 
+                        industry=industry, 
+                        role=role, 
+                        offering=my_offering
+                    )
+                    st.session_state.similar_prospects = similar_prospects
                     
-                    if not has_email and not has_linkedin:
-                        st.warning("First attempt empty, retrying generation...")
-                        time.sleep(2)
+                    with st.spinner(f"Generating Multi-Channel Campaigns (Found {len(similar_prospects)} similar profiles)..."):
                         messages = generator.generate_campaign(analysis, my_offering, context_prospects=similar_prospects)
-                    
-                    st.session_state.generated_messages = messages
+                        
+                        # Retry logic if generation fails (empty messages)
+                        has_email = messages and messages.get("email", {}).get("body", "")
+                        has_linkedin = messages and messages.get("linkedin", "")
+                        
+                        if not has_email and not has_linkedin:
+                            st.warning("First attempt empty, retrying generation...")
+                            time.sleep(2)
+                            messages = generator.generate_campaign(analysis, my_offering, context_prospects=similar_prospects)
+                        
+                        st.session_state.generated_messages = messages
+                else:
+                    st.error(f"Analysis Error: {analysis.get('error')}")
             else:
-                st.error(f"Analysis Error: {analysis.get('error')}")
+                st.error("❌ No valid data could be extracted from the provided sources.")
 
     # Display Results
     if st.session_state.get('analysis_result') and "error" not in st.session_state.analysis_result:
@@ -194,6 +275,15 @@ with tab1:
         
         with col1:
             st.subheader("🔍 Analysis")
+            
+            # Show which data sources were used
+            if st.session_state.get('data_sources_used'):
+                sources = st.session_state.data_sources_used
+                if len(sources) > 1:
+                    st.caption(f"📊 **Analyzed from {len(sources)} sources**: {', '.join(sources)}")
+                else:
+                    st.caption(f"📊 **Source**: {', '.join(sources)}")
+            
             st.json(st.session_state.analysis_result)
             
             # Show Similar Prospects Context
